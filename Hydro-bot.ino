@@ -1,39 +1,35 @@
-
 #include <Arduino.h>
 #include <ArduinoJson.h>
 //--------------- ESP32 Libraries
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
+long lastMsg = 0;
+char msg[50];
+int value = 0;
 //---------------------------------
+#include <PubSubClient.h>
+const char* mqtt_server = "192.168.0.104";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
 #include "DHTesp.h"
 #define DHTpin 14    //D15 of ESP32 DevKit
-#include "CapacitiveMoisture.h"
-//---------
-const   unsigned short g_PinSensor = 36;
-const   unsigned int  g_CallibrationMin = 1400; // Default min (DRY)
-const   unsigned int  g_CallibrationMax = 3040; // Default max (under water)
-const   unsigned int  g_LapseInterval = 2000;   // Lapse interval read on loop
-                                                // if g_LapseInterval=0 -->no lapse
-CapacitiveMoisture    g_SensorCap=CapacitiveMoisture();
 DHTesp dht;
 //---------------------------------
 
+#define SensorPin 35          //pH meter Analog output to Arduino Analog Input 0
+unsigned long int avgValue;  //Store the average value of the sensor feedback
+float b;
+int buf[10],temp;
 
-#define SDA_PIN 4
-#define SCL_PIN 5
-
-WiFiMulti wifiMulti;
-
-const int16_t I2C_MASTER = 0x42;
-const int16_t I2C_SLAVE = 0x08;
-
-const char* ssid = "Epics";
-const char* password = "expo1234";
+//const char* ssid = "Epics";
+//const char* password = "expo1234";
 //const char* ssid = "who is the hottest man";
 //const char* password = "praveenk";
-//const char* ssid = "TP-Link_81BC";
-//const char* password = "09870987";
+const char* ssid = "TP-Link_81BC";
+const char* password = "09870987";
 
 
 const char* fingerprint = "BB DC 45 2A 07 E3 4A 71 33 40 32 DA BE 81 F7 72 6F 4A 2B 6B";
@@ -41,177 +37,202 @@ const char* BotToken = "784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY";
 const char* host = "api.telegram.org";
 const int ssl_port = 443;
 
-boolean first_check = true;
-String G_cmd;
-long G_chat_id;
-long prv_update_id = 0, update_id = 0;
+//boolean first_check = true;
+//String G_cmd;
+//long G_chat_id;
+//long prv_update_id = 0, update_id = 0;
 
+//sensor values
+//int w_temp, humi, temperature, ph;
 
-void scan(String cmd){
-   HTTPClient http;
-  if(cmd == "Status"){
-    Serial.println("Checkpoint 2");
-    String txt1 = "Moisture: " + String(g_SensorCap.read());// + "xx";//String(mos);
-    String txt2 = "Temperature: "+ String(dht.toFahrenheit(dht.getTemperature()));// + "xx";//String(temp);
-    String txt3 = "Humidity: "+ String(dht.getHumidity());// + "xx";//String(humi);
-    Serial.print("txt = ");
-    Serial.println(txt1);
-    Serial.println(txt2);
-    Serial.println(txt3);
-    http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/sendMessage?chat_id=" + String(G_chat_id) + "&text=" + txt1);
-    int httpCode = http.GET();
-    Serial.print("httpCode");
-    Serial.println(httpCode);
-    http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/sendMessage?chat_id=" + String(G_chat_id) + "&text=" + txt2);
-    httpCode = http.GET();
-    Serial.print("httpCode");
-    Serial.println(httpCode);
-    http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/sendMessage?chat_id=" + String(G_chat_id) + "&text=" + txt3);
-    httpCode = http.GET();
-    Serial.print("httpCode");
-    Serial.println(httpCode);
-    if (httpCode > 0) {
-      Serial.print("Send Success, code = ");
-      Serial.println(httpCode);
-    }
-    http.end();
+int ph_read(){
+  for(int i=0;i<10;i++)       //Get 10 sample value from the sensor for smooth the value
+  { 
+    buf[i]=analogRead(SensorPin);
+    delay(10);
   }
-  else if(cmd == "R1"){
-    Serial.println("Switching Feedback pump");
-    digitalWrite(26, LOW);
-    delay(2000);
-    digitalWrite(26, HIGH);
-    Serial.println("Switching off pump");
-  }
-  else if(cmd == "R2"){
-    Serial.println("Switching vlave");
-    digitalWrite(25, HIGH);
-    delay(10000);
-    digitalWrite(25, LOW);
-    Serial.println("Switching off Valve");
-  }
-  //else{text_to_send = "Unidentified command"};
-  else{
-      Serial.println("Checkpoint 2.1");
-      String txt = "Unidentified command";
-      http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/sendMessage?chat_id=" + String(G_chat_id) + "&text=" + txt);
-      int httpCode = http.GET();
-      Serial.print("httpCode = ");
-      Serial.println(httpCode);
-      if (httpCode > 0) {
-        Serial.print("Send Success, code = ");
-        Serial.println(httpCode);
+  for(int i=0;i<9;i++)        //sort the analog from small to large
+  {
+    for(int j=i+1;j<10;j++)
+    {
+      if(buf[i]>buf[j])
+      {
+        temp=buf[i];
+        buf[i]=buf[j];
+        buf[j]=temp;
       }
-      http.end();
-  }
-}
-
-boolean Reply(){
-  extern boolean first_check;
-  extern String G_cmd;
-  extern long G_chat_id;
-  HTTPClient http;
-  http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/getUpdates?offset=-1");
-  int httpCode = http.GET();
-  Serial.println("HTTP connection started...\n httpCode = ");
-  Serial.println(httpCode);
-  if (httpCode > 0){
-    StaticJsonDocument<768> doc;
-    String payload = http.getString();
-    Serial.print(payload);
-    DeserializationError error = deserializeJson(doc, payload);
-    if (error) {
-      Serial.print(F("deserializeJson() failed: "));
-      Serial.println(error.f_str());
-      http.end();
-      return false;
     }
-    //-------------------Reading from Json Buffer
-    JsonObject result_0_message = doc["result"][0]["message"];
-    JsonObject result_0_message_chat = result_0_message["chat"];
-    //String cmd = doc["result"][0]["message"]["text"];
-    const char* cmd = result_0_message["text"]; // "Status"
-    G_cmd = cmd;
-    //update_id = doc["result"][0]["update_id"];
-    long update_id = doc["result"][0]["update_id"];
-    //String chat_id =  doc["result"][0]["message"]["chat"]["id"];
-    long chat_id = result_0_message_chat["id"];
-    G_chat_id = chat_id;
-    http.end();
-    Serial.println();
-    Serial.print("cmd = ");
-    Serial.println(G_cmd);
-    Serial.print("chat_id = ");
-    Serial.println(G_chat_id);
-    Serial.print("update_id = ");
-    Serial.println(update_id);
-    Serial.print("prv_update_id = ");
-    Serial.println(prv_update_id);
-    //--------------------------validating if the update is new
-  if(prv_update_id == 0){
-    prv_update_id = update_id;
-    return false;
   }
-  else if(prv_update_id == update_id){
-    //Serial.println("First Check\n");
-    return false;
-  }else{
-    //first_check = false;
-    prv_update_id = update_id;
-    return true;
-  }
+  avgValue=0;
+  for(int i=2;i<8;i++)                      //take the average value of 6 center sample
+    avgValue+=buf[i];
+  float phValue=(float)avgValue*5.0/1024/6; //convert the analog into millivolt
+  phValue=3.5*phValue;
+
+  return 5;
+  return phValue;
+}
+
+int dht_read_temperature(){
+  return 5;
+  return dht.toFahrenheit(dht.getTemperature());
+}
+
+int dht_read_humidity(){
+  return 5;
+  return dht.getHumidity();
+}
+
+int water_temperature(){
+  
+  return 5;
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("ESP8266Client")) {
+      Serial.println("connected");
+      // Subscribe
+      client.subscribe("esp32/output");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
   }
 }
 
-void Send(String txt, long chat_id){
-  Serial.println("Checkpoint 3");
-  HTTPClient http;
-  Serial.println(String(G_chat_id));
-  http.begin("https://api.telegram.org/bot784890187:AAGuBQx0ZY_Vo02Dwc35N54NNnEN4kxxSxY/sendMessage?chat_id="+String(G_chat_id)+"&text="+txt);
-  int httpCode = http.GET();
-  Serial.println(httpCode);
-  http.end();
-  Serial.println("Checkpoint 3.1");
+void setup_wifi() {
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+ 
+  WiFi.begin(ssid, password);
+ 
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+ 
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: ");
+  String messageTemp;
+  
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
+  //update_id = int(messageTemp );
+  // Feel free to add more if statements to control more GPIOs with MQTT
+
+  // If a message is received on the topic esp32/output, you check if the message is either "on" or "off". 
+  // Changes the output state according to the message
+  /*
+  if (String(topic) == "esp32/output") {
+    Serial.print("Changing output to ");
+    if(messageTemp == "on"){
+      Serial.println("on");
+      digitalWrite(ledPin, HIGH);
+    }
+    else if(messageTemp == "off"){
+      Serial.println("off");
+      digitalWrite(ledPin, LOW);
+    }*/
+      char *humiString = (char*)malloc(8);
+      //humi = String(dht_read_humidity());
+      dtostrf((double)dht_read_humidity(), 1, 2, humiString);
+      Serial.print("humistring: ");
+      Serial.println(humiString);
+      client.publish("esp32/tele/humidity", humiString);
+      free(humiString);
+      
+      delay(100);
+      
+      char *tempString = (char*)malloc(8);
+      dtostrf((double)dht_read_temperature(), 1, 2, tempString);
+      Serial.print("tempstring: ");
+      Serial.println(tempString);
+      client.publish("esp32/tele/temperature", tempString);
+      free(tempString);
+
+      delay(100);
+      
+      char *w_tempString = (char*)malloc(8);
+      dtostrf((double)water_temperature(), 1, 2, w_tempString);
+      client.publish("esp32/tele/temp_water", w_tempString);
+      free(w_tempString);
+
+      delay(100);
+      
+      char *phString = (char*)malloc(8);
+      dtostrf((double)ph_read(), 1, 2, phString);
+      client.publish("esp32/tele/phvalue", phString);
+      free(tempString);
 }
 
 void setup(){
   Serial.begin(115200);
-  // Autodetect is not working reliable, don't use the following line
-  // use this instead: 
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
   dht.setup(DHTpin, DHTesp::DHT11); //for DHT11 Connect DHT sensor to GPIO 17
-  pinMode(26, OUTPUT);
-  digitalWrite(26, HIGH);
-  pinMode(25, OUTPUT);
-  digitalWrite(25, LOW);
-  //---------------
-  g_SensorCap.setup(g_PinSensor, g_LapseInterval, g_CallibrationMin,  g_CallibrationMax);
-  // if you want see callibration recomended values keep this three lines.
-  // in other case remove
-  unsigned int numRead=100;           // number of read for callibration
-  unsigned int LapseDelayMillis=3000; //Time lapse between readings
-  //g_SensorCap.debugCalibration(numRead,LapseDelayMillis);
-  for(uint8_t t = 4; t > 0; t--) {
-        Serial.printf("[SETUP] WAIT %d...\n", t);
-        Serial.flush();
-        delay(1000);
-    }
-  wifiMulti.addAP(ssid, password);
-  //Wire.begin(SDA_PIN, SCL_PIN, I2C_MASTER); 
 }
 
 void loop(){
-  if(wifiMulti.run() == WL_CONNECTED){
-    if(Reply()){
-      Serial.println("recieved an update");
-      scan(G_cmd);
-      delay(500);
-      //Send(txtx, G_chat_id);
-      delay(2000);
+  if(WiFi.status() == WL_CONNECTED){
+    if (!client.connected()) {
+      reconnect();
     }
-    else{
-      Serial.println("No updates in chat, waiting...\n");
-      delay(1000);
+    client.loop();
+
+    long now = millis();
+    if (now - lastMsg > 5000) {
+      lastMsg = now;
+      char *humiString = (char*)malloc(8);
+      //humi = String(dht_read_humidity());
+      dtostrf((double)dht_read_humidity(), 1, 2, humiString);
+      client.publish("esp32/humidity", humiString);
+      free(humiString);
+      
+      delay(100);
+      
+      char *tempString = (char*)malloc(8);
+      dtostrf((double)dht_read_temperature(), 1, 2, tempString);
+      client.publish("esp32/temperature", tempString);
+      free(tempString);
+
+      delay(100);
+      
+      char *w_tempString = (char*)malloc(8);
+      dtostrf((double)water_temperature(), 1, 2, w_tempString);
+      client.publish("esp32/temp_water", w_tempString);
+      free(w_tempString);
+
+      delay(100);
+      
+      char *phString = (char*)malloc(8);
+      dtostrf((double)ph_read(), 1, 2, phString);
+      client.publish("esp32/phvalue", phString);
+      free(tempString);
+      
+      //(void)water_temperature();
     }
-  }
+    }
   //return 0;
 }

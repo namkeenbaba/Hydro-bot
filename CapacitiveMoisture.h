@@ -10,7 +10,7 @@
 #ifndef CAPACITIVE_MOISURE_H
 #define CAPACITIVE_MOISURE_H
 #define CAPACITIVE_MOISURE_DEBUG
-#include <arduino.h>
+#include <Arduino.h>
 #include <driver/adc.h>
 #include <esp_adc_cal.h>
 
