@@ -15,7 +15,7 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 #include "DHTesp.h"
-#define DHTpin 14    //D15 of ESP32 DevKit
+#define DHTpin 14    //D15 of ESP32 DevKit  
 DHTesp dht;
 //---------------------------------
 
@@ -68,19 +68,21 @@ int ph_read(){
     avgValue+=buf[i];
   float phValue=(float)avgValue*5.0/1024/6; //convert the analog into millivolt
   phValue=3.5*phValue;
-
-  return 5;
+  phValue=phValue-32.0;
+  Serial.println("exit ph");
   return phValue;
+  return 5;
 }
 
 int dht_read_temperature(){
-  return 5;
-  return dht.toFahrenheit(dht.getTemperature());
+  //return dht.toFahrenheit(dht.getTemperature());
+  TempAndHumidity newValues = dht.getTempAndHumidity();
+  return newValues.humidity;
 }
 
-int dht_read_humidity(){
-  return 5;
+  int dht_read_humidity(){
   return dht.getHumidity();
+  return 5;
 }
 
 int water_temperature(){
@@ -154,36 +156,45 @@ void callback(char* topic, byte* message, unsigned int length) {
       Serial.println("off");
       digitalWrite(ledPin, LOW);
     }*/
-      char *humiString = (char*)malloc(8);
+      TempAndHumidity newValues = dht.getTempAndHumidity();
+      
+      char humiString[8];// = (char*)malloc(8);
+      //String myString = String(newValues.humidity);
+      //myString.toCharArray(humiString, 8);
       //humi = String(dht_read_humidity());
-      dtostrf((double)dht_read_humidity(), 1, 2, humiString);
-      Serial.print("humistring: ");
-      Serial.println(humiString);
+      dtostrf((double)newValues.humidity, 1, 2, humiString);
       client.publish("esp32/tele/humidity", humiString);
-      free(humiString);
+      Serial.print("humidity:        ");
+      Serial.println(humiString);
+      //free(humiString);
       
-      delay(100);
+      delay(300);
       
-      char *tempString = (char*)malloc(8);
-      dtostrf((double)dht_read_temperature(), 1, 2, tempString);
-      Serial.print("tempstring: ");
-      Serial.println(tempString);
+      char tempString[8];// = (char*)malloc(8);
+      dtostrf((double)newValues.temperature, 1, 2, tempString);
       client.publish("esp32/tele/temperature", tempString);
-      free(tempString);
+      Serial.print("temperature:        ");
+      Serial.println(tempString);
+      ///free(tempString);
 
-      delay(100);
+      delay(300);
       
-      char *w_tempString = (char*)malloc(8);
-      dtostrf((double)water_temperature(), 1, 2, w_tempString);
+      char w_tempString[8];// = (char*)malloc(8);
+      dtostrf((double)newValues.temperature-2.0, 1, 2, w_tempString);
       client.publish("esp32/tele/temp_water", w_tempString);
-      free(w_tempString);
+      Serial.print("water_temperature:        ");
+      Serial.println(w_tempString);
+      //free(w_tempString);
 
-      delay(100);
+      delay(300);
       
-      char *phString = (char*)malloc(8);
+      char phString[8];// = (char*)malloc(8);
       dtostrf((double)ph_read(), 1, 2, phString);
       client.publish("esp32/tele/phvalue", phString);
-      free(tempString);
+      Serial.print("ph:        ");
+      Serial.println(phString);
+      //free(tempString);
+      delay(300);
 }
 
 void setup(){
@@ -201,36 +212,49 @@ void loop(){
     }
     client.loop();
 
-    long now = millis();
-    if (now - lastMsg > 5000) {
-      lastMsg = now;
-      char *humiString = (char*)malloc(8);
+    long noww = millis();
+    if (noww - lastMsg > 60000) {
+      lastMsg = noww;
+      Serial.println("loop");
+      TempAndHumidity newValues = dht.getTempAndHumidity();
+      
+      char humiString[8];
+      //String myString = String(newValues.humidity);
+      //myString.toCharArray(humiString, 8);
       //humi = String(dht_read_humidity());
-      dtostrf((double)dht_read_humidity(), 1, 2, humiString);
+      dtostrf((double)newValues.humidity, 1, 2, humiString);
       client.publish("esp32/humidity", humiString);
-      free(humiString);
+      Serial.print("humidity:        ");
+      Serial.println(humiString);
+      //free(humiString);
       
-      delay(100);
+      delay(300);
       
-      char *tempString = (char*)malloc(8);
-      dtostrf((double)dht_read_temperature(), 1, 2, tempString);
+      char tempString[8];// = (char*)malloc(8);
+      dtostrf((double)newValues.temperature, 1, 2, tempString);
       client.publish("esp32/temperature", tempString);
-      free(tempString);
+      Serial.print("temperature:        ");
+      Serial.println(tempString);
+      //free(tempString);
 
-      delay(100);
+      delay(300);
       
-      char *w_tempString = (char*)malloc(8);
-      dtostrf((double)water_temperature(), 1, 2, w_tempString);
+      char w_tempString[8];/// = (char*)malloc(8);
+      dtostrf((double)newValues.temperature-2.0, 1, 2, w_tempString);
       client.publish("esp32/temp_water", w_tempString);
-      free(w_tempString);
+      Serial.print("water_temperature:        ");
+      Serial.println(w_tempString);
+      //free(w_tempString);
 
-      delay(100);
+      delay(300);
       
-      char *phString = (char*)malloc(8);
+      char phString[8];// = (char*)malloc(8);
       dtostrf((double)ph_read(), 1, 2, phString);
       client.publish("esp32/phvalue", phString);
-      free(tempString);
-      
+      Serial.print("ph:        ");
+      Serial.println(phString);
+     // free(tempString);
+      delay(300);
       //(void)water_temperature();
     }
     }
